@@ -206,5 +206,74 @@ namespace Solana.Unity.SDK.Tests.EditMode.MwaClient
             Assert.AreEqual(authToken, request.Params.AuthToken,
                 "Params.AuthToken must match the supplied auth token");
         }
+
+
+        // Chain identifier (MWA 2.0) - the field that fixes the Seed Vault/Seeker network mismatch
+        [Test]
+        public void Authorize_SendsJsonRpc_WithChain_WhenProvided()
+        {
+            // Arrange
+            var identityUri = new Uri("https://example.com");
+            const string chain = "solana:devnet";
+
+            // Act
+            _ = _client.Authorize(identityUri, null, "TestApp", "devnet", chain);
+
+            // Assert
+            var request = DecodeLastRequest();
+            Assert.AreEqual(chain, request.Params.Chain,
+                "Params.Chain must match the supplied chain identifier");
+        }
+
+        [Test]
+        public void Authorize_SerializesChain_UnderChainKey()
+        {
+            // Arrange
+            var identityUri = new Uri("https://example.com");
+
+            // Act
+            _ = _client.Authorize(identityUri, null, "TestApp", "devnet", "solana:devnet");
+
+            // Assert raw wire format - the wallet reads the JSON key "chain"
+            var json = Encoding.UTF8.GetString(_sender.LastMessage);
+            StringAssert.Contains("\"chain\":\"solana:devnet\"", json,
+                "Serialized request must carry the chain under the \"chain\" key");
+        }
+
+        [Test]
+        public void Authorize_OmitsChain_WhenNull()
+        {
+            // Arrange
+            var identityUri = new Uri("https://example.com");
+
+            // Act - no chain supplied (e.g. localnet), should fall back to legacy cluster only
+            _ = _client.Authorize(identityUri, null, "TestApp", "mainnet-beta");
+
+            // Assert
+            var request = DecodeLastRequest();
+            Assert.IsNull(request.Params.Chain, "Chain must be null when not supplied");
+            var json = Encoding.UTF8.GetString(_sender.LastMessage);
+            StringAssert.DoesNotContain("\"chain\"", json,
+                "The \"chain\" key must be omitted from the payload when null");
+        }
+
+        [Test]
+        public void Reauthorize_SendsJsonRpc_WithChain_WhenProvided()
+        {
+            // Arrange
+            var identityUri = new Uri("https://example.com");
+            const string authToken = "test-auth-token-abc123";
+            const string chain = "solana:devnet";
+
+            // Act
+            _ = _client.Reauthorize(identityUri, null, "TestApp", authToken, chain);
+
+            // Assert - reauthorize must also assert the chain so MWA 2.0 wallets keep the right network
+            var request = DecodeLastRequest();
+            Assert.AreEqual(chain, request.Params.Chain,
+                "Reauthorize must forward the chain identifier");
+            Assert.IsNull(request.Params.Cluster,
+                "Reauthorize must not send the legacy cluster field");
+        }
     }
 }

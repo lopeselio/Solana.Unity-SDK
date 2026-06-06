@@ -27,6 +27,11 @@ namespace Solana.Unity.SDK
     {
         private const string PrefKeyPublicKey = "solana_sdk.mwa.public_key";
         private const string PrefKeyAuthToken = "solana_sdk.mwa.auth_token";
+        // Records the MWA chain the cached auth token was authorized against. A token minted by an
+        // older build (or against a different network) is not re-scoped by reauthorize, so we compare
+        // this against the current chain and force a fresh authorize on mismatch. This is what fixes
+        // the intermittent "network mismatch" on Seed Vault/Seeker where a stale token stayed mainnet.
+        private const string PrefKeyChain = "solana_sdk.mwa.chain";
         
         private readonly SolanaMobileWalletAdapterOptions _walletOptions;
         
@@ -77,11 +82,17 @@ namespace Solana.Unity.SDK
 
         protected override async Task<Account> _Login(string password = null)
         {
+            var chain = ChainNameMap[(int)RpcCluster];
             if (_walletOptions.keepConnectionAlive)
             {
                 string pk = PlayerPrefs.GetString(PrefKeyPublicKey, null);
                 string authToken = PlayerPrefs.GetString(PrefKeyAuthToken, null);
-                if (!pk.IsNullOrEmpty() && !authToken.IsNullOrEmpty())
+                string cachedChain = PlayerPrefs.GetString(PrefKeyChain, null);
+                // Only reuse the cached token if it was authorized against the current chain.
+                // A token from an older build has no recorded chain (null) and may be mainnet-scoped,
+                // so we drop it and force a fresh authorize below rather than risk a network mismatch.
+                bool chainMatches = string.Equals(cachedChain, chain, StringComparison.Ordinal);
+                if (!pk.IsNullOrEmpty() && !authToken.IsNullOrEmpty() && chainMatches)
                 {
                     string reauthPublicKey = null;
                     // TODO: change to using var after PR #260 merges (IDisposable not yet on LocalAssociationScenario)
@@ -94,7 +105,7 @@ namespace Solana.Unity.SDK
                                 var reauth = await client.Reauthorize(
                                     new Uri(_walletOptions.identityUri),
                                     new Uri(_walletOptions.iconUri, UriKind.Relative),
-                                    _walletOptions.name, authToken);
+                                    _walletOptions.name, authToken, chain);
                                 if (reauth != null && !string.IsNullOrEmpty(reauth.AuthToken))
                                 {
                                     _authToken = reauth.AuthToken;
@@ -123,11 +134,16 @@ namespace Solana.Unity.SDK
                     // Reauthorize failed or returned empty token - clear cached credentials
                     PlayerPrefs.DeleteKey(PrefKeyPublicKey);
                     PlayerPrefs.DeleteKey(PrefKeyAuthToken);
+                    PlayerPrefs.DeleteKey(PrefKeyChain);
                     PlayerPrefs.Save();
                 }
-                else if (!pk.IsNullOrEmpty())
+                else if (!pk.IsNullOrEmpty() || !authToken.IsNullOrEmpty())
                 {
+                    // Leftover credentials we won't reuse (e.g. chain mismatch or a stale token from
+                    // an older build) - drop them so the fresh authorize below binds the correct chain.
                     PlayerPrefs.DeleteKey(PrefKeyPublicKey);
+                    PlayerPrefs.DeleteKey(PrefKeyAuthToken);
+                    PlayerPrefs.DeleteKey(PrefKeyChain);
                     PlayerPrefs.Save();
                 }
             }
@@ -142,7 +158,7 @@ namespace Solana.Unity.SDK
                         authorization = await client.Authorize(
                             new Uri(_walletOptions.identityUri),
                             new Uri(_walletOptions.iconUri, UriKind.Relative),
-                            _walletOptions.name, cluster);
+                            _walletOptions.name, cluster, chain);
                     }
                 }
             );
@@ -163,10 +179,21 @@ namespace Solana.Unity.SDK
                 {
                     PlayerPrefs.SetString(PrefKeyPublicKey, publicKey.ToString());
                     PlayerPrefs.SetString(PrefKeyAuthToken, _authToken);
+                    PersistChain(chain);
                     PlayerPrefs.Save();
                 }
             }
             return new Account(string.Empty, publicKey);
+        }
+
+        // Persists the chain the cached auth token is scoped to (or clears it for localnet/null),
+        // so a later login can detect a mismatch and re-authorize instead of reusing a stale token.
+        private static void PersistChain(string chain)
+        {
+            if (string.IsNullOrEmpty(chain))
+                PlayerPrefs.DeleteKey(PrefKeyChain);
+            else
+                PlayerPrefs.SetString(PrefKeyChain, chain);
         }
 
         protected override async Task<Transaction> _SignTransaction(Transaction transaction)
@@ -182,6 +209,7 @@ namespace Solana.Unity.SDK
                 _authToken = PlayerPrefs.GetString(PrefKeyAuthToken, null);
 
             var cluster = RPCNameMap[(int)RpcCluster];
+            var chain = ChainNameMap[(int)RpcCluster];
             SignedResult res = null;
             var localAssociationScenario = new LocalAssociationScenario();
             AuthorizationResult authorization = null;
@@ -195,14 +223,14 @@ namespace Solana.Unity.SDK
                             authorization = await client.Authorize(
                                 new Uri(_walletOptions.identityUri),
                                 new Uri(_walletOptions.iconUri, UriKind.Relative),
-                                _walletOptions.name, cluster);
+                                _walletOptions.name, cluster, chain);
                         }
                         else
                         {
                             authorization = await client.Reauthorize(
                                 new Uri(_walletOptions.identityUri),
                                 new Uri(_walletOptions.iconUri, UriKind.Relative),
-                                _walletOptions.name, _authToken);   
+                                _walletOptions.name, _authToken, chain);
                         }
                     },
                     async client =>
@@ -230,6 +258,7 @@ namespace Solana.Unity.SDK
                 if (_walletOptions.keepConnectionAlive)
                 {
                     PlayerPrefs.SetString(PrefKeyAuthToken, _authToken);
+                    PersistChain(chain);
                     PlayerPrefs.Save();
                 }
             }
@@ -243,6 +272,7 @@ namespace Solana.Unity.SDK
             PlayerPrefs.DeleteKey(PrefKeyPublicKey);
             _authToken = null;
             PlayerPrefs.DeleteKey(PrefKeyAuthToken);
+            PlayerPrefs.DeleteKey(PrefKeyChain);
             PlayerPrefs.Save();
         }
 
@@ -344,6 +374,7 @@ namespace Solana.Unity.SDK
             var localAssociationScenario = new LocalAssociationScenario();
             AuthorizationResult authorization = null;
             var cluster = RPCNameMap[(int)RpcCluster];
+            var chain = ChainNameMap[(int)RpcCluster];
             var result = await localAssociationScenario.StartAndExecute(
                 new List<Action<IAdapterOperations>>
                 {
@@ -354,14 +385,14 @@ namespace Solana.Unity.SDK
                             authorization = await client.Authorize(
                                 new Uri(_walletOptions.identityUri),
                                 new Uri(_walletOptions.iconUri, UriKind.Relative),
-                                _walletOptions.name, cluster);
+                                _walletOptions.name, cluster, chain);
                         }
                         else
                         {
                             authorization = await client.Reauthorize(
                                 new Uri(_walletOptions.identityUri),
                                 new Uri(_walletOptions.iconUri, UriKind.Relative),
-                                _walletOptions.name, _authToken);   
+                                _walletOptions.name, _authToken, chain);
                         }
                     },
                     async client =>
@@ -392,6 +423,7 @@ namespace Solana.Unity.SDK
                 if (_walletOptions.keepConnectionAlive)
                 {
                     PlayerPrefs.SetString(PrefKeyAuthToken, _authToken);
+                    PersistChain(chain);
                     PlayerPrefs.Save();
                 }
             }

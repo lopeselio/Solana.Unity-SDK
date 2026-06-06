@@ -48,6 +48,14 @@ namespace Solana.Unity.SDK
             [RequiredMember]
             public string Cluster { get; set; }
 
+            // MWA 2.0 chain identifier (e.g. "solana:devnet"). Newer wallets such as
+            // Seed Vault on Seeker key the authorization network off this field and default
+            // to mainnet when it is absent; older wallets still read the legacy "cluster".
+            // We send both for maximum compatibility.
+            [JsonProperty("chain", NullValueHandling = NullValueHandling.Ignore)]
+            [RequiredMember]
+            public string Chain { get; set; }
+
             [JsonProperty("auth_token", NullValueHandling = NullValueHandling.Ignore)]
             [RequiredMember]
             

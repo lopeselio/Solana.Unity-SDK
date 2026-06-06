@@ -9,9 +9,9 @@ using UnityEngine.Scripting;
 public interface IAdapterOperations
 {
     [Preserve]
-    public Task<AuthorizationResult> Authorize(Uri identityUri, Uri iconUri, string identityName, string rpcCluster);
+    public Task<AuthorizationResult> Authorize(Uri identityUri, Uri iconUri, string identityName, string rpcCluster, string chain = null);
     [Preserve]
-    public Task<AuthorizationResult> Reauthorize(Uri identityUri, Uri iconUri, string identityName, string authToken);
+    public Task<AuthorizationResult> Reauthorize(Uri identityUri, Uri iconUri, string identityName, string authToken, string chain = null);
     [Preserve]
     public Task Deauthorize(string authToken);
     [Preserve]

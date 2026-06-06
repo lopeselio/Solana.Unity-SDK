@@ -49,6 +49,17 @@ namespace Solana.Unity.SDK
             { 3, "localnet" },
         };
 
+        // MWA 2.0 chain identifiers (CAIP-2 style) used by the Mobile Wallet Adapter
+        // authorize/reauthorize flow. localnet has no standard chain id, so it stays null
+        // and the request falls back to the legacy "cluster" field only.
+        protected readonly Dictionary<int, string> ChainNameMap = new ()
+        {
+            { 0, "solana:mainnet" },
+            { 1, "solana:devnet" },
+            { 2, "solana:testnet" },
+            { 3, null },
+        };
+
         protected readonly string CustomRpcUri;
         protected string CustomStreamingRpcUri;
 

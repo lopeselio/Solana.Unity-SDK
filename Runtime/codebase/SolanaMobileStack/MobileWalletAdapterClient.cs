@@ -21,27 +21,32 @@ public class MobileWalletAdapterClient: JsonRpc20Client, IAdapterOperations, IMe
     }
     
     [Preserve]
-    public Task<AuthorizationResult> Authorize(Uri identityUri, Uri iconUri, string identityName, string cluster)
+    public Task<AuthorizationResult> Authorize(Uri identityUri, Uri iconUri, string identityName, string cluster, string chain = null)
     {
         var request = PrepareAuthRequest(
             identityUri,
-            iconUri, 
-            identityName, 
+            iconUri,
+            identityName,
             cluster,
+            chain,
             "authorize");
-        
+
         return SendRequest<AuthorizationResult>(request);
     }
 
-    public Task<AuthorizationResult> Reauthorize(Uri identityUri, Uri iconUri, string identityName, string authToken)
+    public Task<AuthorizationResult> Reauthorize(Uri identityUri, Uri iconUri, string identityName, string authToken, string chain = null)
     {
+        // Pass the chain through on reauthorize too: MWA 2.0 wallets treat authorize-with-auth_token
+        // as a reauthorization and still honor "chain", while legacy wallets ignore it. This keeps the
+        // network scope explicit instead of letting the wallet fall back to its default (mainnet).
         var request = PrepareAuthRequest(
             identityUri,
-            iconUri, 
-            identityName, 
+            iconUri,
+            identityName,
             null,
+            chain,
             "reauthorize");
-        
+
         request.Params.AuthToken = authToken;
 
         return SendRequest<AuthorizationResult>(request);
@@ -71,7 +76,7 @@ public class MobileWalletAdapterClient: JsonRpc20Client, IAdapterOperations, IMe
         return SendRequest<SignedResult>(request);
     }
 
-    private JsonRequest PrepareAuthRequest(Uri uriIdentity, Uri icon, string name, string cluster, string method)
+    private JsonRequest PrepareAuthRequest(Uri uriIdentity, Uri icon, string name, string cluster, string chain, string method)
     {
         if (uriIdentity != null && !uriIdentity.IsAbsoluteUri)
         {
@@ -93,7 +98,8 @@ public class MobileWalletAdapterClient: JsonRpc20Client, IAdapterOperations, IMe
                     Icon = icon,
                     Name = name
                 },
-                Cluster = cluster
+                Cluster = cluster,
+                Chain = chain
             },
             Id = NextMessageId()
         };
